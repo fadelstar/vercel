@@ -7,7 +7,7 @@ import getScope from '../../util/get-scope';
 import list from '../../util/input/list';
 import cmd from '../../util/output/cmd';
 import indent from '../../util/output/indent';
-import { getLinkedProject } from '../../util/projects/link';
+import { getOptionalLinkedProject } from '../../util/integration/get-optional-linked-project';
 import type {
   BillingPlan,
   Integration,
@@ -20,13 +20,13 @@ import { provisionStoreResource } from '../../util/integration/provision-store-r
 import { resolveResourceName } from '../../util/integration/generate-resource-name';
 import {
   parseMetadataFlags,
-  validateRequiredMetadata,
+  validateAndPrintRequiredMetadata,
 } from '../../util/integration/parse-metadata';
 import { addAutoProvision } from './add-auto-provision';
 import { connectResourceToProject } from '../../util/integration-resource/connect-resource-to-project';
 import { fetchBillingPlans } from '../../util/integration/fetch-billing-plans';
 import { fetchInstallations } from '../../util/integration/fetch-installations';
-import { fetchIntegration } from '../../util/integration/fetch-integration';
+import { fetchIntegrationWithTelemetry } from '../../util/integration/fetch-integration';
 import { selectProduct } from '../../util/integration/select-product';
 import output from '../../output-manager';
 import { IntegrationAddTelemetryClient } from '../../util/telemetry/commands/integration/add';
@@ -40,13 +40,6 @@ export async function add(
   resourceNameArg?: string,
   metadataFlags?: string[]
 ) {
-  const telemetry = new IntegrationAddTelemetryClient({
-    opts: {
-      store: client.telemetryEventStore,
-    },
-  });
-  telemetry.trackCliOptionName(resourceNameArg);
-
   if (args.length > 1) {
     output.error('Cannot install more than one integration at a time');
     return 1;
@@ -79,13 +72,21 @@ export async function add(
   // Note: Resource name validation happens after product selection
   // to apply product-specific validation rules
 
-  // Auto-provision: completely separate code path
+  // Auto-provision: completely separate code path (self-contained telemetry)
   if (process.env.FF_AUTO_PROVISION_INSTALL === '1') {
     return await addAutoProvision(client, integrationSlug, resourceNameArg, {
       productSlug,
       metadata: metadataFlags,
     });
   }
+
+  const telemetry = new IntegrationAddTelemetryClient({
+    opts: {
+      store: client.telemetryEventStore,
+    },
+  });
+  telemetry.trackCliOptionName(resourceNameArg);
+  telemetry.trackCliOptionMetadata(metadataFlags);
 
   const { contextName, team } = await getScope(client);
 
@@ -94,21 +95,13 @@ export async function add(
     return 1;
   }
 
-  let integration: Integration | undefined;
-  let knownIntegrationSlug = false;
-  try {
-    integration = await fetchIntegration(client, integrationSlug);
-    knownIntegrationSlug = true;
-  } catch (error) {
-    output.error(
-      `Failed to get integration "${integrationSlug}": ${(error as Error).message}`
-    );
+  const integration = await fetchIntegrationWithTelemetry(
+    client,
+    integrationSlug,
+    telemetry
+  );
+  if (!integration) {
     return 1;
-  } finally {
-    telemetry.trackCliArgumentIntegration(
-      integrationSlug,
-      knownIntegrationSlug
-    );
   }
 
   if (!integration.products?.length) {
@@ -181,14 +174,19 @@ export async function add(
   const { resourceName } = nameResult;
 
   // Validate --metadata flags early (fail fast, even if CLI provisioning not supported)
+  let parsedMetadata: Metadata | undefined;
   if (metadataFlags?.length) {
-    const { errors } = parseMetadataFlags(metadataFlags, metadataSchema);
+    const { metadata: parsed, errors } = parseMetadataFlags(
+      metadataFlags,
+      metadataSchema
+    );
     if (errors.length) {
       for (const error of errors) {
         output.error(error);
       }
       return 1;
     }
+    parsedMetadata = parsed;
   }
 
   // The provisioning via cli is possible when
@@ -196,7 +194,7 @@ export async function add(
   // 2. EITHER metadata is provided via flags OR wizard is supported
   // 3. The selected billing plan is supported (handled at time of billing plan selection)
   const provisionResourceViaCLIIsSupported =
-    installation && (metadataFlags?.length || metadataWizard.isSupported);
+    installation && (parsedMetadata || metadataWizard.isSupported);
 
   if (!provisionResourceViaCLIIsSupported) {
     const projectLink = await getOptionalLinkedProject(client);
@@ -218,7 +216,8 @@ export async function add(
         integration.id,
         product.id,
         projectLink?.project?.id,
-        resourceName
+        resourceName,
+        parsedMetadata
       );
     }
 
@@ -233,31 +232,8 @@ export async function add(
     product,
     metadataWizard,
     resourceName,
-    metadataFlags
+    parsedMetadata
   );
-}
-
-async function getOptionalLinkedProject(client: Client) {
-  const linkedProject = await getLinkedProject(client);
-
-  if (linkedProject.status === 'not_linked') {
-    return;
-  }
-
-  const shouldLinkToProject = await client.input.confirm(
-    'Do you want to link this resource to the current project?',
-    true
-  );
-
-  if (!shouldLinkToProject) {
-    return;
-  }
-
-  if (linkedProject.status === 'error') {
-    return { status: 'error', exitCode: linkedProject.exitCode };
-  }
-
-  return { status: 'success', project: linkedProject.project };
 }
 
 function provisionResourceViaWebUI(
@@ -265,7 +241,8 @@ function provisionResourceViaWebUI(
   integrationId: string,
   productId: string,
   projectId?: string,
-  resourceName?: string
+  resourceName?: string,
+  metadata?: Metadata
 ) {
   const url = new URL('/api/marketplace/cli', 'https://vercel.com');
   url.searchParams.set('teamId', teamId);
@@ -277,6 +254,9 @@ function provisionResourceViaWebUI(
   }
   if (resourceName) {
     url.searchParams.set('defaultResourceName', resourceName);
+  }
+  if (metadata && Object.keys(metadata).length > 0) {
+    url.searchParams.set('metadata', JSON.stringify(metadata));
   }
   url.searchParams.set('cmd', 'add');
   output.print('Opening the Vercel Dashboard to continue the installation...');
@@ -292,47 +272,28 @@ async function provisionResourceViaCLI(
   product: IntegrationProduct,
   metadataWizard: MetadataWizard,
   name: string,
-  metadataFlags?: string[]
+  parsedMetadata?: Metadata
 ) {
-  // Validate/collect metadata BEFORE billing plan selection (fail fast)
-  let metadata: Metadata;
-  if (metadataFlags?.length) {
-    // Parse metadata from CLI flags
-    output.debug(
-      `Parsing metadata from flags: ${JSON.stringify(metadataFlags)}`
-    );
-    const { metadata: parsed, errors } = parseMetadataFlags(
-      metadataFlags,
-      product.metadataSchema
-    );
-    if (errors.length) {
-      for (const error of errors) {
-        output.error(error);
-      }
-      return 1;
-    }
-    // OLD path: validate required fields (server won't fill defaults)
-    const missingErrors = validateRequiredMetadata(
-      parsed,
-      product.metadataSchema
-    );
-    if (missingErrors.length) {
-      for (const error of missingErrors) {
-        output.error(error);
-      }
-      return 1;
-    }
-    metadata = parsed;
-  } else if (!client.stdin.isTTY) {
-    // Non-interactive without flags: error (OLD path doesn't have server defaults)
+  // Metadata already validated in add() - check non-interactive mode for wizard
+  if (!parsedMetadata && !client.stdin.isTTY) {
     output.error(
-      'Metadata is required in non-interactive mode. Use --metadata KEY=VALUE flags.'
+      "Metadata is required in non-interactive mode. Use --metadata KEY=VALUE flags. Run 'vercel integration add <name> --help' to see available keys."
     );
     return 1;
-  } else {
-    // Run wizard in interactive mode without --metadata flags
-    metadata = await metadataWizard.run(client);
   }
+
+  // Validate required fields if metadata was provided via flags
+  if (parsedMetadata) {
+    if (
+      !validateAndPrintRequiredMetadata(parsedMetadata, product.metadataSchema)
+    ) {
+      return 1;
+    }
+  }
+
+  // Get metadata from flags or wizard
+  const metadata: Metadata =
+    parsedMetadata ?? (await metadataWizard.run(client));
 
   let billingPlans: BillingPlan[] | undefined;
   try {
@@ -381,7 +342,8 @@ async function provisionResourceViaCLI(
         integration.id,
         product.id,
         projectLink?.project?.id,
-        name
+        name,
+        metadata
       );
     }
 

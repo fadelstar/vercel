@@ -91,6 +91,20 @@ describe('integration', () => {
           expect(output).toContain('acme-b');
         });
 
+        it('should show usage examples for metadata fields in dynamic help', async () => {
+          client.setArgv('integration', 'add', 'acme-full-schema', '--help');
+          const exitCode = await integrationCommand(client);
+          expect(exitCode).toEqual(0);
+          const output = client.getFullOutput();
+          // String field with options should show first option
+          expect(output).toContain('Example:');
+          expect(output).toContain('-m region=us-east-1');
+          // Boolean field
+          expect(output).toContain('-m auth=true');
+          // Array field with options should show first two options
+          expect(output).toContain('-m "readRegions=us-east-1,us-west-1"');
+        });
+
         it('should fall back to standard help when integration not found', async () => {
           client.setArgv('integration', 'add', 'does-not-exist', '--help');
           const exitCode = await integrationCommand(client);
@@ -248,6 +262,33 @@ describe('integration', () => {
           expect(openMock).toHaveBeenCalledWith(
             'https://vercel.com/api/marketplace/cli?teamId=team_dummy&integrationId=acme&productId=acme-product&source=cli&defaultResourceName=my-custom-db&cmd=add'
           );
+        });
+
+        it('should forward --metadata to browser fallback URL when no installation', async () => {
+          client.setArgv(
+            'integration',
+            'add',
+            'acme',
+            '--metadata',
+            'region=us-east-1'
+          );
+          const exitCodePromise = integrationCommand(client);
+          await expect(client.stderr).toOutput(
+            `Installing Acme Product by Acme Integration under ${team.slug}`
+          );
+          await expect(client.stderr).toOutput(
+            'Terms have not been accepted. Open Vercel Dashboard? (Y/n)'
+          );
+          client.stdin.write('y\n');
+          const exitCode = await exitCodePromise;
+          expect(exitCode, 'exit code for "integration"').toEqual(0);
+          const calledUrl = openMock.mock.calls[0]?.[0] as string;
+          const parsed = new URL(calledUrl);
+          expect(parsed.searchParams.get('metadata')).toEqual(
+            JSON.stringify({ region: 'us-east-1' })
+          );
+          expect(parsed.searchParams.get('source')).toEqual('cli');
+          expect(parsed.searchParams.get('cmd')).toEqual('add');
         });
 
         it('should include custom --name and projectId in URL when user accepts project link', async () => {
@@ -524,8 +565,21 @@ describe('integration', () => {
           );
           client.stdin.write('Y\n');
           await expect(exitCodePromise).resolves.toEqual(0);
-          expect(openMock).toHaveBeenCalledWith(
-            'https://vercel.com/api/marketplace/cli?teamId=team_dummy&integrationId=acme-prepayment&productId=acme-product&source=cli&defaultResourceName=acme-gray-apple&cmd=add'
+          const calledUrl = openMock.mock.calls[0]?.[0] as string;
+          const parsed = new URL(calledUrl);
+          expect(parsed.searchParams.get('teamId')).toEqual('team_dummy');
+          expect(parsed.searchParams.get('integrationId')).toEqual(
+            'acme-prepayment'
+          );
+          expect(parsed.searchParams.get('productId')).toEqual('acme-product');
+          expect(parsed.searchParams.get('source')).toEqual('cli');
+          expect(parsed.searchParams.get('defaultResourceName')).toEqual(
+            'acme-gray-apple'
+          );
+          expect(parsed.searchParams.get('cmd')).toEqual('add');
+          // Wizard-collected metadata is forwarded to the browser
+          expect(parsed.searchParams.get('metadata')).toEqual(
+            JSON.stringify({ region: 'us-west-1' })
           );
         });
       });
@@ -1072,13 +1126,7 @@ describe('integration', () => {
           await expect(client.stderr).toOutput(
             `Installing Acme Product by Acme Integration under ${team.slug}`
           );
-          // Should prompt for resource name
-          await expect(client.stderr).toOutput(
-            'What is the name of the resource?'
-          );
-          client.stdin.write('test-resource\n');
-          // Should skip region wizard since --metadata provided
-          // Go straight to billing plan selection
+          // Auto-generated name, --metadata provides metadata — skip wizard, go to billing
           await expect(client.stderr).toOutput('Choose a billing plan');
           client.stdin.write('\n');
           await expect(client.stderr).toOutput('Confirm selection?');
@@ -1093,7 +1141,7 @@ describe('integration', () => {
           const exitCode = await integrationCommand(client);
           expect(exitCode, 'exit code for "integration"').toEqual(1);
           await expect(client.stderr).toOutput(
-            'Error: Metadata is required in non-interactive mode. Use --metadata KEY=VALUE flags.'
+            "Error: Metadata is required in non-interactive mode. Use --metadata KEY=VALUE flags. Run 'vercel integration add <name> --help' to see available keys."
           );
         });
 
@@ -1112,12 +1160,10 @@ describe('integration', () => {
           await expect(client.stderr).toOutput(
             `Installing Acme Product by Acme Integration under ${team.slug}`
           );
-          // In non-TTY, use input.text still works for resource name
-          await expect(client.stderr).toOutput(
-            'What is the name of the resource?'
-          );
-          client.stdin.write('test-resource\n');
-          // Should skip wizard and go to billing plan
+          // --metadata skips the wizard, but billing plan selection and confirmation
+          // still require interactive prompts (no --plan flag yet). The mock client
+          // processes stdin writes regardless of isTTY, so this tests metadata bypass
+          // rather than full non-interactive provisioning.
           await expect(client.stderr).toOutput('Choose a billing plan');
           client.stdin.write('\n');
           await expect(client.stderr).toOutput('Confirm selection?');
@@ -1139,11 +1185,7 @@ describe('integration', () => {
           const exitCodePromise = integrationCommand(client);
           await expect(client.stderr).toOutput('Installing Acme Product');
           // Should NOT fall back to web UI since --metadata provided
-          // Should proceed to resource name prompt
-          await expect(client.stderr).toOutput(
-            'What is the name of the resource?'
-          );
-          client.stdin.write('test-resource\n');
+          // Auto-generated name, --metadata provides metadata — skip wizard, go to billing
           await expect(client.stderr).toOutput('Choose a billing plan');
           client.stdin.write('\n');
           await expect(client.stderr).toOutput('Confirm selection?');
@@ -1151,6 +1193,65 @@ describe('integration', () => {
           await expect(exitCodePromise).resolves.toEqual(0);
           // Should NOT have opened browser
           expect(openMock).not.toHaveBeenCalled();
+        });
+
+        it('should track metadata telemetry when --metadata is used', async () => {
+          useIntegration({ withInstallation: true, ownerId: team.id });
+          usePreauthorization();
+          client.setArgv(
+            'integration',
+            'add',
+            'acme',
+            '--metadata',
+            'region=us-east-1'
+          );
+          const exitCodePromise = integrationCommand(client);
+          await expect(client.stderr).toOutput('Choose a billing plan');
+          client.stdin.write('\n');
+          await expect(client.stderr).toOutput('Confirm selection?');
+          client.stdin.write('y\n');
+          await expect(exitCodePromise).resolves.toEqual(0);
+
+          expect(client.telemetryEventStore).toHaveTelemetryEvents([
+            {
+              key: 'subcommand:add',
+              value: 'add',
+            },
+            {
+              key: 'option:metadata',
+              value: '[REDACTED]',
+            },
+            {
+              key: 'argument:integration',
+              value: 'acme',
+            },
+          ]);
+        });
+
+        it('should forward --metadata to browser URL when prepayment plan selected', async () => {
+          useIntegration({ withInstallation: true, ownerId: team.id });
+          usePreauthorization();
+          client.setArgv(
+            'integration',
+            'add',
+            'acme-prepayment',
+            '--metadata',
+            'region=us-east-1'
+          );
+          const exitCodePromise = integrationCommand(client);
+          await expect(client.stderr).toOutput('Choose a billing plan');
+          client.stdin.write('\n');
+          await expect(client.stderr).toOutput(
+            'You have selected a plan that cannot be provisioned through the CLI. Open \nVercel Dashboard?'
+          );
+          client.stdin.write('y\n');
+          const exitCode = await exitCodePromise;
+          expect(exitCode).toEqual(0);
+          const calledUrl = openMock.mock.calls[0]?.[0] as string;
+          const parsed = new URL(calledUrl);
+          expect(parsed.searchParams.get('metadata')).toEqual(
+            JSON.stringify({ region: 'us-east-1' })
+          );
         });
       });
     });

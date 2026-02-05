@@ -148,6 +148,33 @@ const metadataSchema3: MetadataSchema = {
   required: ['Region'],
 };
 
+const metadataFullTypes: MetadataSchema = {
+  type: 'object',
+  properties: {
+    region: {
+      'ui:control': 'select',
+      'ui:label': 'Region',
+      type: 'string',
+      'ui:options': ['us-east-1', 'us-west-1'],
+    },
+    auth: {
+      'ui:control': 'toggle',
+      'ui:label': 'Auth',
+      description: 'Enable built-in authentication',
+      type: 'boolean',
+      default: false,
+    },
+    readRegions: {
+      type: 'array',
+      'ui:control': 'multi-vercel-region',
+      'ui:label': 'Read Regions',
+      items: { type: 'string' },
+      'ui:options': ['us-east-1', 'us-west-1', 'eu-central-1'],
+    },
+  },
+  required: ['region'],
+};
+
 const metadataUnsupported: MetadataSchema = {
   type: 'object',
   properties: {
@@ -246,6 +273,21 @@ const integrations: Record<string, Integration> = {
     name: 'Acme Integration No Products',
     slug: 'acme-no-products',
     products: [],
+  },
+  'acme-full-schema': {
+    id: 'acme-full-schema',
+    name: 'Acme Full Schema',
+    slug: 'acme-full-schema',
+    products: [
+      {
+        id: 'acme-product',
+        name: 'Acme Product',
+        slug: 'acme',
+        type: 'storage',
+        shortDescription: 'The Acme product with all field types',
+        metadataSchema: metadataFullTypes,
+      },
+    ],
   },
   'acme-prepayment': {
     id: 'acme-prepayment',

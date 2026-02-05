@@ -4,7 +4,8 @@ import output from '../../output-manager';
 import type Client from '../../util/client';
 import getScope from '../../util/get-scope';
 import { autoProvisionResource } from '../../util/integration/auto-provision-resource';
-import { fetchIntegration } from '../../util/integration/fetch-integration';
+import { fetchIntegrationWithTelemetry } from '../../util/integration/fetch-integration';
+import { getOptionalLinkedProject } from '../../util/integration/get-optional-linked-project';
 import { selectProduct } from '../../util/integration/select-product';
 import type {
   AcceptedPolicies,
@@ -15,9 +16,11 @@ import { resolveResourceName } from '../../util/integration/generate-resource-na
 import cmd from '../../util/output/cmd';
 import indent from '../../util/output/indent';
 import { packageName } from '../../util/pkg-name';
-import { getLinkedProject } from '../../util/projects/link';
 import { IntegrationAddTelemetryClient } from '../../util/telemetry/commands/integration/add';
-import { parseMetadataFlags } from '../../util/integration/parse-metadata';
+import {
+  parseMetadataFlags,
+  validateAndPrintRequiredMetadata,
+} from '../../util/integration/parse-metadata';
 import type { Metadata } from '../../util/integration/types';
 
 export interface AddAutoProvisionOptions {
@@ -36,6 +39,8 @@ export async function addAutoProvision(
       store: client.telemetryEventStore,
     },
   });
+  telemetry.trackCliOptionName(resourceNameArg);
+  telemetry.trackCliOptionMetadata(options.metadata);
 
   // 1. Get team context
   const { contextName, team } = await getScope(client);
@@ -44,24 +49,14 @@ export async function addAutoProvision(
     return 1;
   }
 
-  telemetry.trackCliOptionName(resourceNameArg);
-
   // 2. Fetch integration
-  let integration;
-  let knownIntegrationSlug = false;
-  try {
-    integration = await fetchIntegration(client, integrationSlug);
-    knownIntegrationSlug = true;
-  } catch (error) {
-    output.error(
-      `Failed to get integration "${integrationSlug}": ${(error as Error).message}`
-    );
+  const integration = await fetchIntegrationWithTelemetry(
+    client,
+    integrationSlug,
+    telemetry
+  );
+  if (!integration) {
     return 1;
-  } finally {
-    telemetry.trackCliArgumentIntegration(
-      integrationSlug,
-      knownIntegrationSlug
-    );
   }
 
   if (!integration.products?.length) {
@@ -90,7 +85,6 @@ export async function addAutoProvision(
   );
 
   // 4. Validate metadata flags (if provided) BEFORE prompting for resource name
-  //    In NEW path, server fills defaults - we never run the wizard here
   let metadata: Metadata;
   if (options.metadata?.length) {
     // Parse metadata from CLI flags
@@ -105,6 +99,10 @@ export async function addAutoProvision(
       for (const error of errors) {
         output.error(error);
       }
+      return 1;
+    }
+    // Validate all required fields are present
+    if (!validateAndPrintRequiredMetadata(parsed, product.metadataSchema)) {
       return 1;
     }
     metadata = parsed;
@@ -213,6 +211,9 @@ export async function addAutoProvision(
     const url = new URL(result.url);
     url.searchParams.set('defaultResourceName', resourceName);
     url.searchParams.set('source', 'cli');
+    if (Object.keys(metadata).length > 0) {
+      url.searchParams.set('metadata', JSON.stringify(metadata));
+    }
     if (projectLink?.project) {
       url.searchParams.set('projectSlug', projectLink.project.name);
     }
@@ -281,27 +282,4 @@ export async function addAutoProvision(
   );
 
   return 0;
-}
-
-async function getOptionalLinkedProject(client: Client) {
-  const linkedProject = await getLinkedProject(client);
-
-  if (linkedProject.status === 'not_linked') {
-    return;
-  }
-
-  const shouldLinkToProject = await client.input.confirm(
-    'Do you want to link this resource to the current project?',
-    true
-  );
-
-  if (!shouldLinkToProject) {
-    return;
-  }
-
-  if (linkedProject.status === 'error') {
-    return { status: 'error' as const, exitCode: linkedProject.exitCode };
-  }
-
-  return { status: 'success' as const, project: linkedProject.project };
 }

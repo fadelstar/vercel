@@ -23,4 +23,13 @@ export class IntegrationAddTelemetryClient
       });
     }
   }
+
+  trackCliOptionMetadata(v: string[] | undefined) {
+    if (v?.length) {
+      this.trackCliOption({
+        option: 'metadata',
+        value: this.redactedValue,
+      });
+    }
+  }
 }

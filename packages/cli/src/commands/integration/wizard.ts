@@ -44,7 +44,7 @@ function createInputStep(key: string, schema: MetadataSchemaProperty) {
       return async (client: Client) => {
         const value = await client.input.text({
           message: schema['ui:placeholder'] || schema['ui:label'] || key,
-          default: schema.default,
+          default: schema.default as string | undefined,
         });
         return [key, value] as const;
       };
@@ -53,7 +53,7 @@ function createInputStep(key: string, schema: MetadataSchemaProperty) {
       return async (client: Client) => {
         const value = await client.input.text({
           message: schema['ui:placeholder'] || schema['ui:label'] || key,
-          default: schema.default,
+          default: schema.default as string | undefined,
           validate: value => {
             const number = Number(value);
 
@@ -203,7 +203,7 @@ export function createMetadataWizard(
 }
 
 function getMetadataFromReadOnlyFields(metadataSchema: MetadataSchema) {
-  const metadata: Record<string, string | number | undefined> = {};
+  const metadata: Metadata = {};
 
   for (const [key, schema] of Object.entries(metadataSchema.properties)) {
     if (isHidden(schema)) {
