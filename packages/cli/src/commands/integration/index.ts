@@ -23,6 +23,7 @@ import { openIntegration } from './open-integration';
 import { remove } from './remove-integration';
 import { fetchIntegration } from '../../util/integration/fetch-integration';
 import { formatProductHelp } from '../../util/integration/format-product-help';
+import { formatMetadataSchemaHelp } from '../../util/integration/format-schema-help';
 
 const COMMAND_CONFIG = {
   add: getCommandAliases(addSubcommand),
@@ -76,7 +77,7 @@ export default async function main(client: Client) {
         telemetry.trackCliFlagHelp('integration', subcommandOriginal);
         printHelp(addSubcommand);
 
-        // Dynamic help: if an integration slug is provided, fetch and show available products
+        // Dynamic help: if an integration slug is provided, fetch and show available products + metadata schema
         const rawArg = subArgs[0];
         if (rawArg) {
           // Strip product slug if slash syntax was used (e.g. "upstash/upstash-kv" → "upstash")
@@ -86,6 +87,15 @@ export default async function main(client: Client) {
             const products = integration.products ?? [];
             if (products.length > 1) {
               output.print(formatProductHelp(integrationSlug, products));
+            }
+            const product = products[0];
+            if (product?.metadataSchema) {
+              output.print(
+                formatMetadataSchemaHelp(
+                  product.metadataSchema,
+                  integrationSlug
+                )
+              );
             }
           } catch (err: unknown) {
             output.debug(
@@ -107,8 +117,11 @@ export default async function main(client: Client) {
         return 1;
       }
       const resourceName = addParsedArgs.flags['--name'] as string | undefined;
+      const metadataFlags = addParsedArgs.flags['--metadata'] as
+        | string[]
+        | undefined;
 
-      return add(client, addParsedArgs.args, resourceName);
+      return add(client, addParsedArgs.args, resourceName, metadataFlags);
     }
     case 'list': {
       if (needHelp) {
