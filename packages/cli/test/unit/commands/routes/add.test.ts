@@ -50,6 +50,8 @@ describe('routes add', () => {
         '/api/:path*',
         '--syntax',
         'path-to-regexp',
+        '--action',
+        'rewrite',
         '--dest',
         'https://api.example.com/:path*',
         '--yes'
@@ -75,6 +77,8 @@ describe('routes add', () => {
         '/blog',
         '--syntax',
         'equals',
+        '--action',
+        'redirect',
         '--dest',
         '/articles',
         '--status',
@@ -97,6 +101,8 @@ describe('routes add', () => {
         'Block Admin',
         '--src',
         '^/admin/.*$',
+        '--action',
+        'set-status',
         '--status',
         '403',
         '--yes'
@@ -170,6 +176,8 @@ describe('routes add', () => {
         '/proxy/:path*',
         '--syntax',
         'path-to-regexp',
+        '--action',
+        'rewrite',
         '--dest',
         'https://backend.com/:path*',
         '--set-request-header',
@@ -197,6 +205,8 @@ describe('routes add', () => {
         '/api/:path*',
         '--syntax',
         'path-to-regexp',
+        '--action',
+        'rewrite',
         '--dest',
         '/protected-api',
         '--has',
@@ -221,6 +231,8 @@ describe('routes add', () => {
         '/api/:path*',
         '--syntax',
         'path-to-regexp',
+        '--action',
+        'rewrite',
         '--dest',
         '/public-api',
         '--missing',
@@ -245,6 +257,8 @@ describe('routes add', () => {
         '/api/:path*',
         '--syntax',
         'path-to-regexp',
+        '--action',
+        'rewrite',
         '--dest',
         '/handler',
         '--has',
@@ -275,6 +289,8 @@ describe('routes add', () => {
         '/path',
         '--syntax',
         'equals',
+        '--action',
+        'rewrite',
         '--dest',
         '/dest',
         '--description',
@@ -299,6 +315,8 @@ describe('routes add', () => {
         '/disabled',
         '--syntax',
         'equals',
+        '--action',
+        'rewrite',
         '--dest',
         '/dest',
         '--disabled',
@@ -322,6 +340,8 @@ describe('routes add', () => {
         '/priority',
         '--syntax',
         'equals',
+        '--action',
+        'rewrite',
         '--dest',
         '/handler',
         '--position',
@@ -346,6 +366,8 @@ describe('routes add', () => {
         '/after',
         '--syntax',
         'equals',
+        '--action',
+        'rewrite',
         '--dest',
         '/handler',
         '--position',
@@ -368,6 +390,8 @@ describe('routes add', () => {
         'Test Route',
         '--src',
         '/test',
+        '--action',
+        'rewrite',
         '--dest',
         '/dest',
         '--yes'
@@ -401,6 +425,8 @@ describe('routes add', () => {
         'add',
         '--src',
         '/path',
+        '--action',
+        'rewrite',
         '--dest',
         '/dest',
         '--yes'
@@ -415,7 +441,16 @@ describe('routes add', () => {
     it('should error when --src is missing with --yes', async () => {
       useAddRoute();
 
-      client.setArgv('routes', 'add', 'My Route', '--dest', '/dest', '--yes');
+      client.setArgv(
+        'routes',
+        'add',
+        'My Route',
+        '--action',
+        'rewrite',
+        '--dest',
+        '/dest',
+        '--yes'
+      );
       const exitCodePromise = routes(client);
 
       await expect(client.stderr).toOutput('Source path is required');
@@ -433,6 +468,8 @@ describe('routes add', () => {
         longName,
         '--src',
         '/path',
+        '--action',
+        'rewrite',
         '--dest',
         '/dest',
         '--yes'
@@ -454,6 +491,8 @@ describe('routes add', () => {
         'My Route',
         '--src',
         '/path',
+        '--action',
+        'rewrite',
         '--dest',
         '/dest',
         '--description',
@@ -478,6 +517,8 @@ describe('routes add', () => {
         '/path',
         '--syntax',
         'invalid',
+        '--action',
+        'rewrite',
         '--dest',
         '/dest',
         '--yes'
@@ -498,6 +539,8 @@ describe('routes add', () => {
         'My Route',
         '--src',
         '/path',
+        '--action',
+        'rewrite',
         '--dest',
         '/dest',
         '--position',
@@ -520,6 +563,8 @@ describe('routes add', () => {
         'My Route',
         '--src',
         '/path',
+        '--action',
+        'rewrite',
         '--dest',
         '/dest',
         '--has',
@@ -542,6 +587,8 @@ describe('routes add', () => {
         'My Route',
         '--src',
         '/path',
+        '--action',
+        'rewrite',
         '--dest',
         '/dest',
         '--has',
@@ -555,7 +602,7 @@ describe('routes add', () => {
       await expect(exitCodePromise).resolves.toEqual(1);
     });
 
-    it('should error when using --dest with non-redirect status', async () => {
+    it('should error when using --dest without --action', async () => {
       useAddRoute();
 
       client.setArgv(
@@ -566,13 +613,59 @@ describe('routes add', () => {
         '/path',
         '--dest',
         '/dest',
+        '--yes'
+      );
+      const exitCodePromise = routes(client);
+
+      await expect(client.stderr).toOutput('--action is required');
+
+      await expect(exitCodePromise).resolves.toEqual(1);
+    });
+
+    it('should error when --action redirect has non-redirect status', async () => {
+      useAddRoute();
+
+      client.setArgv(
+        'routes',
+        'add',
+        'My Route',
+        '--src',
+        '/path',
+        '--action',
+        'redirect',
+        '--dest',
+        '/dest',
         '--status',
         '404',
         '--yes'
       );
       const exitCodePromise = routes(client);
 
-      await expect(client.stderr).toOutput('Cannot use --dest with status');
+      await expect(client.stderr).toOutput('Invalid redirect status');
+
+      await expect(exitCodePromise).resolves.toEqual(1);
+    });
+
+    it('should error when --action rewrite has --status', async () => {
+      useAddRoute();
+
+      client.setArgv(
+        'routes',
+        'add',
+        'My Route',
+        '--src',
+        '/path',
+        '--action',
+        'rewrite',
+        '--dest',
+        '/dest',
+        '--status',
+        '301',
+        '--yes'
+      );
+      const exitCodePromise = routes(client);
+
+      await expect(client.stderr).toOutput('does not accept --status');
 
       await expect(exitCodePromise).resolves.toEqual(1);
     });
@@ -586,6 +679,8 @@ describe('routes add', () => {
         'My Route',
         '--src',
         '/path',
+        '--action',
+        'rewrite',
         '--dest',
         '/dest',
         '--set-response-header',
@@ -619,6 +714,8 @@ describe('routes add', () => {
         'My Route',
         '--src',
         '/path',
+        '--action',
+        'set-status',
         '--status',
         '99',
         '--yes'
@@ -641,6 +738,8 @@ describe('routes add', () => {
         'My Route',
         '--src',
         '/path',
+        '--action',
+        'set-status',
         '--status',
         '600',
         '--yes'
@@ -664,6 +763,8 @@ describe('routes add', () => {
         'My Route',
         '--src',
         '/path',
+        '--action',
+        'rewrite',
         '--dest',
         '/dest',
       ];
@@ -689,6 +790,8 @@ describe('routes add', () => {
         'My Route',
         '--src',
         '/path',
+        '--action',
+        'rewrite',
         '--dest',
         '/dest',
         '--position',
@@ -715,6 +818,8 @@ describe('routes add', () => {
         'My Route',
         '--src',
         '/path',
+        '--action',
+        'rewrite',
         '--dest',
         '/dest'
       );
@@ -738,6 +843,8 @@ describe('routes add', () => {
         'My Route',
         '--src',
         '/path',
+        '--action',
+        'rewrite',
         '--dest',
         '/dest',
         '--yes'
@@ -762,6 +869,8 @@ describe('routes add', () => {
         '/about',
         '--syntax',
         'equals',
+        '--action',
+        'rewrite',
         '--dest',
         '/about-page',
         '--yes'
@@ -786,6 +895,8 @@ describe('routes add', () => {
         '/api/:version/users/:id',
         '--syntax',
         'path-to-regexp',
+        '--action',
+        'rewrite',
         '--dest',
         '/handler',
         '--yes'
@@ -813,6 +924,8 @@ describe('routes add', () => {
           'API Rewrite',
           '--src',
           '^/api/(.*)$',
+        '--action',
+        'rewrite',
           '--dest',
           'https://api.backend.com/$1',
           '--yes'
@@ -830,6 +943,8 @@ describe('routes add', () => {
           '/users/:userId/posts/:postId',
           '--syntax',
           'path-to-regexp',
+        '--action',
+        'rewrite',
           '--dest',
           'https://api.example.com/users/:userId/posts/:postId',
           '--yes'
@@ -847,6 +962,8 @@ describe('routes add', () => {
           '/api/:path*',
           '--syntax',
           'path-to-regexp',
+        '--action',
+        'rewrite',
           '--dest',
           'https://api.example.com/:path*',
           '--yes'
@@ -864,6 +981,8 @@ describe('routes add', () => {
           '/proxy/:path*',
           '--syntax',
           'path-to-regexp',
+        '--action',
+        'rewrite',
           '--dest',
           'https://secure-backend.com/:path*',
           '--set-request-header',
@@ -887,6 +1006,8 @@ describe('routes add', () => {
           '/old-page',
           '--syntax',
           'equals',
+        '--action',
+        'redirect',
           '--dest',
           '/new-page',
           '--status',
@@ -906,6 +1027,8 @@ describe('routes add', () => {
           '/temp',
           '--syntax',
           'equals',
+        '--action',
+        'redirect',
           '--dest',
           '/temporary-location',
           '--status',
@@ -923,6 +1046,8 @@ describe('routes add', () => {
           'API Maintenance',
           '--src',
           '^/api/v1/.*$',
+        '--action',
+        'redirect',
           '--dest',
           '/maintenance',
           '--status',
@@ -942,6 +1067,8 @@ describe('routes add', () => {
           '/api/v1/:path*',
           '--syntax',
           'path-to-regexp',
+        '--action',
+        'redirect',
           '--dest',
           '/api/v2/:path*',
           '--status',
@@ -961,6 +1088,8 @@ describe('routes add', () => {
           '/docs',
           '--syntax',
           'equals',
+        '--action',
+        'redirect',
           '--dest',
           'https://docs.example.com/',
           '--status',
@@ -980,6 +1109,8 @@ describe('routes add', () => {
           'Block Admin',
           '--src',
           '^/admin/.*$',
+        '--action',
+        'set-status',
           '--status',
           '403',
           '--yes'
@@ -997,6 +1128,8 @@ describe('routes add', () => {
           '/secret/:path*',
           '--syntax',
           'path-to-regexp',
+        '--action',
+        'set-status',
           '--status',
           '404',
           '--yes'
@@ -1012,6 +1145,8 @@ describe('routes add', () => {
           'Maintenance Mode',
           '--src',
           '.*',
+        '--action',
+        'set-status',
           '--status',
           '503',
           '--yes'
@@ -1109,6 +1244,8 @@ describe('routes add', () => {
           '/internal/:path*',
           '--syntax',
           'path-to-regexp',
+        '--action',
+        'rewrite',
           '--dest',
           'https://internal-api.example.com/:path*',
           '--set-request-header',
@@ -1130,6 +1267,8 @@ describe('routes add', () => {
           '/api/:path*',
           '--syntax',
           'path-to-regexp',
+        '--action',
+        'rewrite',
           '--dest',
           '/api-handler/:path*',
           '--set-request-query',
@@ -1153,6 +1292,8 @@ describe('routes add', () => {
           '/webhook/:path*',
           '--syntax',
           'path-to-regexp',
+        '--action',
+        'rewrite',
           '--dest',
           'https://webhook-handler.example.com/:path*',
           '--delete-request-query',
@@ -1178,6 +1319,8 @@ describe('routes add', () => {
           '/protected/:path*',
           '--syntax',
           'path-to-regexp',
+        '--action',
+        'rewrite',
           '--dest',
           '/api/protected/:path*',
           '--has',
@@ -1197,6 +1340,8 @@ describe('routes add', () => {
           '/admin/:path*',
           '--syntax',
           'path-to-regexp',
+        '--action',
+        'rewrite',
           '--dest',
           '/admin-api/:path*',
           '--has',
@@ -1216,6 +1361,8 @@ describe('routes add', () => {
           '/dashboard/:path*',
           '--syntax',
           'path-to-regexp',
+        '--action',
+        'rewrite',
           '--dest',
           '/user-dashboard/:path*',
           '--has',
@@ -1235,6 +1382,8 @@ describe('routes add', () => {
           '/api/:path*',
           '--syntax',
           'path-to-regexp',
+        '--action',
+        'rewrite',
           '--dest',
           '/debug-api/:path*',
           '--has',
@@ -1256,6 +1405,8 @@ describe('routes add', () => {
           '/:path*',
           '--syntax',
           'path-to-regexp',
+        '--action',
+        'rewrite',
           '--dest',
           '/api-handler/:path*',
           '--has',
@@ -1275,6 +1426,8 @@ describe('routes add', () => {
           '/dashboard/:path*',
           '--syntax',
           'path-to-regexp',
+        '--action',
+        'redirect',
           '--dest',
           '/login?redirect=/dashboard/:path*',
           '--status',
@@ -1296,6 +1449,8 @@ describe('routes add', () => {
           '/api/admin/:path*',
           '--syntax',
           'path-to-regexp',
+        '--action',
+        'rewrite',
           '--dest',
           '/admin-handler/:path*',
           '--has',
@@ -1323,6 +1478,8 @@ describe('routes add', () => {
           '/api/premium/:path*',
           '--syntax',
           'path-to-regexp',
+        '--action',
+        'rewrite',
           '--dest',
           'https://premium-api.example.com/:path*',
           '--has',
@@ -1346,6 +1503,8 @@ describe('routes add', () => {
           '/api/cached/:path*',
           '--syntax',
           'path-to-regexp',
+        '--action',
+        'rewrite',
           '--dest',
           'https://api.example.com/:path*',
           '--set-response-header',
@@ -1367,6 +1526,8 @@ describe('routes add', () => {
           '/feature-flag/:path*',
           '--syntax',
           'path-to-regexp',
+        '--action',
+        'rewrite',
           '--dest',
           '/new-feature/:path*',
           '--description',
@@ -1387,6 +1548,8 @@ describe('routes add', () => {
           '/blocked/:path*',
           '--syntax',
           'path-to-regexp',
+        '--action',
+        'set-status',
           '--status',
           '403',
           '--position',
@@ -1408,6 +1571,8 @@ describe('routes add', () => {
           '/:path*',
           '--syntax',
           'path-to-regexp',
+        '--action',
+        'redirect',
           '--dest',
           'https://m.example.com/:path*',
           '--status',
@@ -1450,6 +1615,8 @@ describe('routes add', () => {
           '/proxy',
           '--syntax',
           'equals',
+        '--action',
+        'rewrite',
           '--dest',
           '/handler',
           '--has',
@@ -1469,6 +1636,8 @@ describe('routes add', () => {
           '/complex',
           '--syntax',
           'equals',
+        '--action',
+        'rewrite',
           '--dest',
           '/handler',
         ];
@@ -1493,6 +1662,8 @@ describe('routes add', () => {
         'Quoted Src',
         '--src',
         '"^/old-blog/(.*)$"',
+        '--action',
+        'rewrite',
         '--dest',
         '/blog/$1',
         '--yes'
@@ -1509,6 +1680,8 @@ describe('routes add', () => {
         'Single Quoted Src',
         '--src',
         "'^/api/(.*)$'",
+        '--action',
+        'rewrite',
         '--dest',
         '/handler/$1',
         '--yes'
@@ -1525,6 +1698,8 @@ describe('routes add', () => {
         'Quoted Dest',
         '--src',
         '^/old/(.*)$',
+        '--action',
+        'rewrite',
         '--dest',
         '"/new/$1"',
         '--yes'
@@ -1541,6 +1716,8 @@ describe('routes add', () => {
         'Single Quoted Dest',
         '--src',
         '^/proxy/(.*)$',
+        '--action',
+        'rewrite',
         '--dest',
         "'https://api.example.com/$1'",
         '--yes'
@@ -1557,6 +1734,8 @@ describe('routes add', () => {
         'Both Quoted',
         '--src',
         '"^/old-blog/(.*)$"',
+        '--action',
+        'redirect',
         '--dest',
         '"/blog/$1"',
         '--status',
@@ -1578,6 +1757,8 @@ describe('routes add', () => {
         'Mismatched Quotes',
         '--src',
         '"^/api/(.*)$',
+        '--action',
+        'rewrite',
         '--dest',
         '/handler/$1',
         '--yes'
@@ -1635,6 +1816,8 @@ describe('routes add', () => {
         '/api/:version/users/:id',
         '--syntax',
         'path-to-regexp',
+        '--action',
+        'rewrite',
         '--dest',
         '/handler/:version/:id',
         '--yes'
@@ -1696,6 +1879,8 @@ describe('routes add', () => {
         '/about',
         '--syntax',
         'equals',
+        '--action',
+        'rewrite',
         '--dest',
         '/about-page',
         '--yes'
@@ -1755,6 +1940,8 @@ describe('routes add', () => {
         'Regex Route',
         '--src',
         '^/api/(.*)$',
+        '--action',
+        'rewrite',
         '--dest',
         '/handler/$1',
         '--yes'
@@ -1881,6 +2068,8 @@ describe('routes add', () => {
         'Rewrite With Headers',
         '--src',
         '/api/.*',
+        '--action',
+        'rewrite',
         '--dest',
         'https://api.example.com',
         '--set-response-header',
@@ -1944,6 +2133,8 @@ describe('routes add', () => {
         '/old-path',
         '--syntax',
         'equals',
+        '--action',
+        'redirect',
         '--dest',
         '/new-path',
         '--status',
@@ -2010,6 +2201,8 @@ describe('routes add', () => {
         'Simple Rewrite',
         '--src',
         '/api/.*',
+        '--action',
+        'rewrite',
         '--dest',
         'https://api.example.com',
         '--yes'
@@ -2138,6 +2331,8 @@ describe('routes add', () => {
         'Block With Header',
         '--src',
         '/admin/.*',
+        '--action',
+        'set-status',
         '--status',
         '403',
         '--set-response-header',
@@ -2204,6 +2399,8 @@ describe('routes add', () => {
         'add', // This is the route NAME, not the subcommand
         '--src',
         '/test',
+        '--action',
+        'rewrite',
         '--dest',
         '/handler',
         '--yes'
