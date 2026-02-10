@@ -1,5 +1,11 @@
 # @vercel/build-utils
 
+## 13.3.4
+
+### Patch Changes
+
+- [services] set framework prefixed env var urls to relative path ([#14958](https://github.com/vercel/vercel/pull/14958))
+
 ## 13.3.3
 
 ### Patch Changes
